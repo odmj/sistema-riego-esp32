@@ -1,42 +1,113 @@
 from flask import Flask, request, jsonify
-from datetime import datetime
+from datetime import datetime, timedelta
+from aemet_service import hay_prevision_lluvia
+from telegram_service import enviar_alerta_telegram, iniciar_bot_polling
 
 # Inicializamos la aplicación Flask
 app = Flask(__name__)
 
-# Variable global temporal para simular la orden manual desde el móvil
-# Opciones: "AUTONOMO", "FORZAR_ABRIR", "FORZAR_CERRAR"
-estado_manual_usuario = "AUTONOMO"
+# ==============================================================================
+# CONFIGURACIÓN AGRONÓMICA Y PARÁMETROS DEL SISTEMA
+# ==============================================================================
+# Ventanas autorizadas de riego (Formato 24h: inicio inclusivo, fin exclusivo)
+VENTANAS_RIEGO = [
+    {"inicio": 7,  "fin": 10}, # Ventana Mañana: 07:00 a 09:59
+    {"inicio": 21, "fin": 0}   # Ventana Noche:  21:00 a 23:59 (00:00 de mañana marca el fin)
+]
 
+HORIZONTE_AEMET_HORAS = 4
+
+HUMEDAD_CRITICA = 15.0   # Emergencia: riega directo independientemente del horario o AEMET
+HUMEDAD_OBJETIVO = 25.0  # Umbral para riego autónomo normal
+
+# Variables globales de control
+estado_manual_usuario = "AUTONOMO"  # "AUTONOMO", "FORZAR_ABRIR", "FORZAR_CERRAR"
+ultimo_estado_valvula = "DESCONOCIDO"
+
+
+# Getters y Setters thread-safe para la comunicación con el bot de Telegram
+def obtener_estado_manual():
+    return estado_manual_usuario
+
+def establecer_estado_manual(nuevo_estado):
+    global estado_manual_usuario
+    estado_manual_usuario = nuevo_estado
+
+
+# ==============================================================================
+# FUNCIONES AUXILIARES DE TIEMPO Y GESTIÓN DE DEEP SLEEP
+# ==============================================================================
+def esta_en_ventana_riego(dt_actual):
+    """Comprueba si la hora actual cae dentro de alguna ventana configurada."""
+    hora = dt_actual.hour
+    for v in VENTANAS_RIEGO:
+        inicio = v["inicio"]
+        fin = v["fin"]
+        
+        if fin == 0 and inicio > 0:
+            if hora >= inicio:
+                return True
+        else:
+            if inicio <= hora < fin:
+                return True
+    return False
+
+def minutos_hasta_proxima_ventana(dt_actual):
+    """Calcula los minutos reales que faltan hasta la siguiente ventana de riego."""
+    if esta_en_ventana_riego(dt_actual):
+        return 15  # Si estamos DENTRO de la ventana, el ciclo de chequeo es normal (15 min)
+
+    hora_actual = dt_actual.hour
+    
+    for v in VENTANAS_RIEGO:
+        if hora_actual < v["inicio"]:
+            proximo_inicio = dt_actual.replace(hour=v["inicio"], minute=0, second=0, microsecond=0)
+            segundos = (proximo_inicio - dt_actual).total_seconds()
+            return max(1, int(segundos // 60))
+            
+    primera_ventana = VENTANAS_RIEGO[0]
+    manana = dt_actual + timedelta(days=1)
+    proximo_inicio = manana.replace(hour=primera_ventana["inicio"], minute=0, second=0, microsecond=0)
+    segundos = (proximo_inicio - dt_actual).total_seconds()
+    return max(1, int(segundos // 60))
+
+
+# ==============================================================================
+# ENDPOINT DE TELEMETRÍA
+# ==============================================================================
 @app.route('/api/v1/telemetria', methods=['POST'])
 def recibir_telemetria():
-    global estado_manual_usuario
+    global estado_manual_usuario, ultimo_estado_valvula
     
-    # 1. Extraemos el JSON enviado por el ESP32
     datos = request.get_json()
     
     if not datos:
         return jsonify({"error": "Payload JSON invalido"}), 400
 
-    # 2. Imprimimos los datos recibidos en la consola del servidor
-    hora_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"\n[{hora_actual}] --- TELEMETRÍA RECIBIDA ---")
+    ahora = datetime.now()
+    hora_actual_str = ahora.strftime("%Y-%m-%d %H:%M:%S")
+
+    humedad = float(datos.get('humedad_suelo_pct', 0))
+    bateria = float(datos.get('bateria_v', 0))
+    valvula_reportada = datos.get('valvula_estado', 'DESCONOCIDO')
+
+    print(f"\n[{hora_actual_str}] --- TELEMETRÍA RECIBIDA ---")
     print(f"  Dispositivo : {datos.get('dispositivo_id')}")
     print(f"  Ciclo       : #{datos.get('ciclo')}")
-    print(f"  Batería     : {datos.get('bateria_v')} V")
-    print(f"  Humedad     : {datos.get('humedad_suelo_pct')} %")
-    print(f"  Válvula     : {datos.get('valvula_estado')}")
+    print(f"  Batería     : {bateria} V")
+    print(f"  Humedad     : {humedad} %")
+    print(f"  Válvula     : {valvula_reportada}")
 
-    # 3. Lógica de Decisión del Backend (Intersección Modo Manual vs. Modo Autónomo)
     respuesta = {}
+    minutos_espera = minutos_hasta_proxima_ventana(ahora)
 
+    # Lógica de Decisión del Backend
     if estado_manual_usuario == "FORZAR_ABRIR":
         respuesta = {
             "orden": "ABRIR",
             "motivo": "ORDEN_MANUAL_DESDE_TELEGRAM"
         }
-        # Una vez atendida la orden manual, volvemos al modo autónomo
-        estado_manual_usuario = "AUTONOMO"
+        estado_manual_usuario = "AUTONOMO"  # Una vez atendida, regresamos al modo autónomo
 
     elif estado_manual_usuario == "FORZAR_CERRAR":
         respuesta = {
@@ -46,26 +117,69 @@ def recibir_telemetria():
         estado_manual_usuario = "AUTONOMO"
 
     else:
-        # Lógica Autónoma Local del Servidor (Preludio a la integración con AEMET)
-        humedad = float(datos.get('humedad_suelo_pct', 0))
-        
-        if humedad < 25.0:
+        en_ventana = esta_en_ventana_riego(ahora)
+
+        if humedad < HUMEDAD_CRITICA:
             respuesta = {
                 "orden": "ABRIR",
-                "motivo": "REGALA_HUMEDAD_BAJA_LOCAL"
+                "motivo": "REGALA_HUMEDAD_CRITICA_EMERGENCIA"
             }
+
+        elif not en_ventana:
+            respuesta = {
+                "orden": "CERRADA",
+                "motivo": f"FUERA_DE_VENTANA_RIEGO (Próxima en {minutos_espera} min)"
+            }
+
+        elif humedad < HUMEDAD_OBJETIVO:
+            va_a_llover = hay_prevision_lluvia(horizonte_horas=HORIZONTE_AEMET_HORAS)
+            
+            if va_a_llover:
+                respuesta = {
+                    "orden": "CERRADA",
+                    "motivo": f"AHORRO_PREVISION_LLUVIA_AEMET_{HORIZONTE_AEMET_HORAS}H"
+                }
+            else:
+                respuesta = {
+                    "orden": "ABRIR",
+                    "motivo": "REGALA_HUMEDAD_BAJA_SIN_LLUVIA"
+                }
+
         else:
             respuesta = {
                 "orden": "CERRADA",
                 "motivo": "HUMEDAD_SUFICIENTE"
             }
 
+    respuesta["siguiente_ventana_min"] = minutos_espera
+    orden_final = respuesta["orden"]
+
+    # --- SENDER OF NOTIFICATIONS TO TELEGRAM ---
+    # Notifica si la válvula cambia de estado o ante eventos clave (emergencia / ahorro por lluvia)
+    if orden_final != valvula_reportada or "EMERGENCIA" in respuesta["motivo"] or "AHORRO" in respuesta["motivo"]:
+        icono = "💧" if orden_final == "ABRIR" else "🔒"
+        alerta = (
+            f"{icono} *CAMBIO DE ESTADO EN RIEGO*\n"
+            f"• *Orden:* `{orden_final}`\n"
+            f"• *Motivo:* `{respuesta['motivo']}`\n"
+            f"• *Humedad Suelo:* {humedad}%\n"
+            f"• *Batería LiFePO4:* {bateria}V\n"
+            f"• *Siguiente chequeo:* en {minutos_espera} min"
+        )
+        enviar_alerta_telegram(alerta)
+
+    ultimo_estado_valvula = orden_final
+
     print(f"  Respuesta   : {respuesta['orden']} ({respuesta['motivo']})")
+    print(f"  Próx.Ventana: dentro de {minutos_espera} minutos")
     print("-------------------------------------------\n")
 
-    # 4. Devolvemos la respuesta JSON al ESP32 con código HTTP 200 (OK)
     return jsonify(respuesta), 200
 
+
 if __name__ == '__main__':
-    # Ejecutamos el servidor escuchando en todas las interfaces de red de tu PC (0.0.0.0) en el puerto 5000
+    # Lanzamos el escuchador de comandos de Telegram en un hilo secundario
+    iniciar_bot_polling(obtener_estado_manual, establecer_estado_manual)
+    
+    # Ejecutamos el servidor Flask
     app.run(host='0.0.0.0', port=5000, debug=True)

@@ -28,11 +28,13 @@ public:
         #endif
     }
 
-    void entrarEnDeepSleep() {
-        uint64_t tiempoSleepUs = (uint64_t)TIEMPO_SLEEP_MIN * 60 * 1000000;
+    // Acepta minutos dinámicos como parámetro. Si no se especifican, usa TIEMPO_SLEEP_MIN por defecto
+    void entrarEnDeepSleep(uint32_t minutosSleep = TIEMPO_SLEEP_MIN) {
+        // Conversión a microsegundos (ULL previene desbordamientos de entero de 32 bits)
+        uint64_t tiempoSleepUs = (uint64_t)minutosSleep * 60ULL * 1000000ULL;
         
         Serial.println("\n------------------------------------------------");
-        Serial.printf("[ENERGÍA] Preparando Deep Sleep por %d minutos...\n", TIEMPO_SLEEP_MIN);
+        Serial.printf("[ENERGÍA] Preparando Deep Sleep por %d minutos...\n", minutosSleep);
         Serial.printf("[ENERGÍA] Ciclo de trabajo #%d completado.\n", contadorCiclos);
         Serial.println("------------------------------------------------\n");
         Serial.flush(); // Vacía el búfer del puerto serie antes de cortar energía a la CPU

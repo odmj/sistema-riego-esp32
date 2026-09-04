@@ -7,9 +7,10 @@
 
 // Estructura C++ para almacenar de forma limpia la orden recibida del Backend/AEMET
 struct OrdenServidor {
-    bool ejecutarCambio;      // true si el servidor ordena cambiar el estado de la válvula
-    EstadoValvula nuevoEstado; // ABIERTA o CERRADA
-    String motivo;            // Ej: "AEMET_PREDICE_LLUVIA", "RIEGO_PROGRAMADO"
+    bool ejecutarCambio;        // true si el servidor ordena cambiar el estado de la válvula
+    EstadoValvula nuevoEstado;   // ABIERTA o CERRADA
+    String motivo;              // Ej: "AEMET_PREDICE_LLUVIA", "REGALA_HUMEDAD_BAJA"
+    int minutosHastaProximaVentana; // Minutos indicados por el backend para el próximo Deep Sleep
 };
 
 class ModuloTelemetria {
@@ -32,11 +33,12 @@ public:
         return payloadJson;
     }
 
-    // Procesa el JSON de respuesta devuelto por el servidor en Python
+    // Procesa el JSON de respuesta devuelto por el servidor en Python (app.py)
     OrdenServidor procesarRespuestaServidor(const String& jsonRespuesta) {
         OrdenServidor ordenResultante;
         ordenResultante.ejecutarCambio = false;
         ordenResultante.motivo = "DESCONOCIDO";
+        ordenResultante.minutosHastaProximaVentana = 15; // Valor por defecto de seguridad (15 min)
 
         JsonDocument doc;
         DeserializationError error = deserializeJson(doc, jsonRespuesta);
@@ -46,11 +48,13 @@ public:
             return ordenResultante;
         }
 
-        // Leemos la orden enviada por el backend ("ABRIR", "CERRAR", "MANTENER")
+        // Leemos la orden enviada por el backend ("ABRIR", "CERRADA", "MANTENER")
         const char* ordenStr = doc["orden"] | "MANTENER";
         const char* motivoStr = doc["motivo"] | "SIN_MOTIVO";
         
         ordenResultante.motivo = String(motivoStr);
+        // Extraemos los minutos que faltan para la siguiente ventana
+        ordenResultante.minutosHastaProximaVentana = doc["siguiente_ventana_min"] | 15;
 
         if (String(ordenStr) == "ABRIR") {
             ordenResultante.ejecutarCambio = true;
@@ -63,16 +67,18 @@ public:
         return ordenResultante;
     }
 
-    // Función de simulación para probar el flujo sin servidor real por ahora
+    // Función de simulación para probar el flujo sin servidor real
     String simularRespuestaBackend(float humedadActual) {
         // Simula la respuesta que construiría nuestro script de Python con AEMET
         JsonDocument doc;
         if (humedadActual < 30.0f) {
             doc["orden"] = "ABRIR";
             doc["motivo"] = "SUELO_SECO_SIN_LLUVIA_AEMET";
+            doc["siguiente_ventana_min"] = 15;
         } else {
             doc["orden"] = "CERRADA";
             doc["motivo"] = "HUMEDAD_OK_O_LLUVIA_PROXIMA";
+            doc["siguiente_ventana_min"] = 120; // Simula 2 horas fuera de ventana
         }
         
         String respuesta;

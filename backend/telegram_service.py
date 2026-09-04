@@ -1,12 +1,16 @@
+import os
 import time
 import requests
 import threading
+from dotenv import load_dotenv
 
-# ==============================================================================
-# CONFIGURACIÓN DEL BOT
-# ==============================================================================
-TELEGRAM_TOKEN = "8782691323:AAEIGgHCg_KM2z47sn4TneQnhWnEUziYPyE"
-TELEGRAM_CHAT_ID = "1077344425"
+# Carga las variables definidas en el archivo local .env
+load_dotenv()
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
 BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 

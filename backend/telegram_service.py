@@ -4,13 +4,15 @@ import requests
 import threading
 from dotenv import load_dotenv
 
-# Carga las variables definidas en el archivo local .env
-load_dotenv()
+# Encuentra la ruta absoluta del archivo .env localizado en la raíz del proyecto
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ENV_PATH = os.path.join(BASE_DIR, '.env')
+
+# Carga las variables desde la raíz
+load_dotenv(dotenv_path=ENV_PATH)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
 BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 

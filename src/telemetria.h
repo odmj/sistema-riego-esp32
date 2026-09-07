@@ -38,7 +38,7 @@ public:
         OrdenServidor ordenResultante;
         ordenResultante.ejecutarCambio = false;
         ordenResultante.motivo = "DESCONOCIDO";
-        ordenResultante.minutosHastaProximaVentana = 15; // Valor por defecto de seguridad (15 min)
+        ordenResultante.minutosHastaProximaVentana = TIEMPO_SLEEP_MIN; // Valor por defecto de seguridad
 
         JsonDocument doc;
         DeserializationError error = deserializeJson(doc, jsonRespuesta);
@@ -54,7 +54,7 @@ public:
         
         ordenResultante.motivo = String(motivoStr);
         // Extraemos los minutos que faltan para la siguiente ventana
-        ordenResultante.minutosHastaProximaVentana = doc["siguiente_ventana_min"] | 15;
+        ordenResultante.minutosHastaProximaVentana = doc["siguiente_ventana_min"] | TIEMPO_SLEEP_MIN;
 
         if (String(ordenStr) == "ABRIR") {
             ordenResultante.ejecutarCambio = true;
@@ -74,7 +74,7 @@ public:
         if (humedadActual < 30.0f) {
             doc["orden"] = "ABRIR";
             doc["motivo"] = "SUELO_SECO_SIN_LLUVIA_AEMET";
-            doc["siguiente_ventana_min"] = 15;
+            doc["siguiente_ventana_min"] = TIEMPO_SLEEP_MIN;
         } else {
             doc["orden"] = "CERRADA";
             doc["motivo"] = "HUMEDAD_OK_O_LLUVIA_PROXIMA";

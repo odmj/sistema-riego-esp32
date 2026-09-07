@@ -17,3 +17,7 @@ __pycache__/
 # Archivos de Entorno y Claves Secretas
 .env
 *.env
+
+# Datos locales de telemetría
+data/*.sqlite3
+backend/flask.log

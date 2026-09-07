@@ -19,14 +19,14 @@
 // ==========================================
 // 3. PARÁMETROS ENERGÉTICOS Y DE TIEMPO
 // ==========================================
-#define TIEMPO_SLEEP_MIN    15   // Tiempo a dormir entre mediciones (Minutos)
+#define TIEMPO_SLEEP_MIN    30   // Tiempo a dormir entre mediciones (Minutos)
 #define PULSO_VALVULA_MS    100  // Ancho del pulso de 9V para la válvula (Milisegundos)
 
 // ==========================================
 // 4. CALIBRACIÓN DEL SENSOR CAPACITIVO
 // ==========================================
-#define CALIB_AIRE          3200 // Valor ADC en seco (0% humedad)
-#define CALIB_AGUA          1500 // Valor ADC sumergido (100% humedad)
+#define CALIB_AIRE          3260 // Valor ADC en seco (0% humedad)
+#define CALIB_AGUA          1040 // Valor ADC sumergido (100% humedad)
 
 // --- CONFIGURACIÓN DE RED Y BACKEND ---
 #define WIFI_SSID       "AIREON654846"

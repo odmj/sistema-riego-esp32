@@ -31,13 +31,16 @@ def enviar_alerta_telegram(mensaje):
     }
     try:
         res = requests.post(url, json=payload, timeout=5)
-        return res.status_code == 200
+        if res.status_code != 200:
+            print(f"[TELEGRAM] Error enviando mensaje ({res.status_code}): {res.text}")
+            return False
+        return True
     except Exception as e:
         print(f"[TELEGRAM] Error al enviar mensaje: {e}")
         return False
 
 
-def _bucle_polling(get_estado_func, set_estado_func):
+def _bucle_polling(get_estado_func, set_estado_func, get_telemetria_func):
     """Bucle en segundo plano que escucha comandos entrantes mediante getUpdates."""
     last_update_id = 0
     print("[TELEGRAM] Oyente de comandos iniciado (Polling activo)...")
@@ -71,19 +74,20 @@ def _bucle_polling(get_estado_func, set_estado_func):
                         msj = (
                             "🤖 *Bot de Control de Riego IoT*\n\n"
                             "Comandos disponibles:\n"
-                            "• `/abrir` - Forzar apertura en el próximo ciclo\n"
+                            "• `/regar` - Forzar apertura en el próximo ciclo\n"
                             "• `/cerrar` - Forzar cierre en el próximo ciclo\n"
                             "• `/autonomo` - Volver al modo automático (AEMET + Humedad)\n"
-                            "• `/estado` - Consultar el modo actual del sistema"
+                            "• `/estado` - Consultar el modo actual del sistema\n"
+                            "• `/telemetria` - Consultar la última lectura recibida"
                         )
                         enviar_alerta_telegram(msj)
 
-                    elif cmd == "/abrir":
-                        set_estado_func("FORZAR_ABRIR")
+                    elif cmd == "/regar":
+                        set_estado_func("FORZAR_RIEGO")
                         enviar_alerta_telegram("✅ *Orden registrada:* Se forzará la *APERTURA* de la válvula en la próxima conexión del ESP32.")
 
                     elif cmd == "/cerrar":
-                        set_estado_func("FORZAR_CERRAR")
+                        set_estado_func("FORZAR_CIERRE")
                         enviar_alerta_telegram("⛔ *Orden registrada:* Se forzará el *CIERRE* de la válvula en la próxima conexión del ESP32.")
 
                     elif cmd == "/autonomo":
@@ -94,14 +98,38 @@ def _bucle_polling(get_estado_func, set_estado_func):
                         modo = get_estado_func()
                         enviar_alerta_telegram(f"📊 *Estado Actual del Servidor:* `{modo}`")
 
+                    elif cmd in ["/telemetria", "/ultima"]:
+                        telemetria = get_telemetria_func() if get_telemetria_func else None
+                        if not telemetria:
+                            enviar_alerta_telegram("ℹ️ Todavía no se ha recibido ninguna telemetría.")
+                        else:
+                            mensaje = (
+                                "📡 *Última telemetría recibida*\n"
+                                f"• *Hora:* `{telemetria['hora']}`\n"
+                                f"• *Dispositivo:* `{telemetria['dispositivo']}`\n"
+                                f"• *Ciclo:* `{telemetria['ciclo']}`\n"
+                                f"• *Humedad:* {telemetria['humedad']}%\n"
+                                f"• *Batería:* {telemetria['bateria']} V\n"
+                                f"• *Válvula reportada:* `{telemetria['valvula']}`\n"
+                                f"• *Orden backend:* `{telemetria['orden']}`\n"
+                                f"• *Motivo:* `{telemetria['motivo']}`\n"
+                                f"• *Lluvia próxima 3h:* {telemetria['lluvia_mm'] if telemetria['lluvia_mm'] is not None else 'No consultada'} mm\n"
+                                f"• *Probabilidad próxima 3h:* {telemetria['probabilidad_lluvia'] if telemetria['probabilidad_lluvia'] is not None else 'No consultada'}%\n"
+                                f"• *Siguiente chequeo:* {telemetria['siguiente_ventana_min']} min"
+                            )
+                            enviar_alerta_telegram(mensaje)
+
+            else:
+                print(f"[TELEGRAM] Error en getUpdates ({res.status_code}): {res.text}")
+
         except Exception as e:
-            # Silenciamos errores temporales de red para mantener el hilo vivo
+            print(f"[TELEGRAM] Error en polling: {e}")
             time.sleep(5)
 
         time.sleep(1)
 
 
-def iniciar_bot_polling(get_estado_func, set_estado_func):
+def iniciar_bot_polling(get_estado_func, set_estado_func, get_telemetria_func=None):
     """Inicia el bot en un hilo secundario independiente de Flask."""
     if not TELEGRAM_TOKEN:
         print("[TELEGRAM] Token invalido. Polling deshabilitado.")
@@ -109,7 +137,7 @@ def iniciar_bot_polling(get_estado_func, set_estado_func):
 
     hilo = threading.Thread(
         target=_bucle_polling,
-        args=(get_estado_func, set_estado_func),
+        args=(get_estado_func, set_estado_func, get_telemetria_func),
         daemon=True
     )
     hilo.start()

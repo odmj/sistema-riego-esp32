@@ -1,10 +1,12 @@
-from flask import Flask, request, jsonify
+from flask import Flask, Response, request, jsonify
 from datetime import datetime, timedelta
-from aemet_service import hay_prevision_lluvia
+from aemet_service import obtener_prevision_lluvia
+from persistence import ahora_utc_iso, exportar_telemetria_csv, guardar_telemetria, inicializar_bbdd
 from telegram_service import enviar_alerta_telegram, iniciar_bot_polling
 
 # Inicializamos la aplicación Flask
 app = Flask(__name__)
+inicializar_bbdd()
 
 # ==============================================================================
 # CONFIGURACIÓN AGRONÓMICA Y PARÁMETROS DEL SISTEMA
@@ -15,7 +17,8 @@ VENTANAS_RIEGO = [
     {"inicio": 21, "fin": 0}   # Ventana Noche:  21:00 a 23:59 (00:00 de mañana marca el fin)
 ]
 
-HORIZONTE_AEMET_HORAS = 4
+HORIZONTE_AEMET_HORAS = 3
+INTERVALO_CHEQUEO_RIEGO_MIN = 30
 
 HUMEDAD_CRITICA = 15.0   # Emergencia: riega directo independientemente del horario o AEMET
 HUMEDAD_OBJETIVO = 25.0  # Umbral para riego autónomo normal
@@ -23,6 +26,7 @@ HUMEDAD_OBJETIVO = 25.0  # Umbral para riego autónomo normal
 # Variables globales de control
 estado_manual_usuario = "AUTONOMO"  # "AUTONOMO", "FORZAR_ABRIR", "FORZAR_CERRAR"
 ultimo_estado_valvula = "DESCONOCIDO"
+ultima_telemetria = None
 
 
 # Getters y Setters thread-safe para la comunicación con el bot de Telegram
@@ -32,6 +36,9 @@ def obtener_estado_manual():
 def establecer_estado_manual(nuevo_estado):
     global estado_manual_usuario
     estado_manual_usuario = nuevo_estado
+
+def obtener_ultima_telemetria():
+    return ultima_telemetria.copy() if ultima_telemetria else None
 
 
 # ==============================================================================
@@ -55,7 +62,7 @@ def esta_en_ventana_riego(dt_actual):
 def minutos_hasta_proxima_ventana(dt_actual):
     """Calcula los minutos reales que faltan hasta la siguiente ventana de riego."""
     if esta_en_ventana_riego(dt_actual):
-        return 15  # Si estamos DENTRO de la ventana, el ciclo de chequeo es normal (15 min)
+        return INTERVALO_CHEQUEO_RIEGO_MIN
 
     hora_actual = dt_actual.hour
     
@@ -77,10 +84,11 @@ def minutos_hasta_proxima_ventana(dt_actual):
 # ==============================================================================
 @app.route('/api/v1/telemetria', methods=['POST'])
 def recibir_telemetria():
-    global estado_manual_usuario, ultimo_estado_valvula
+    global estado_manual_usuario, ultimo_estado_valvula, ultima_telemetria
     
     datos = request.get_json()
-    
+    print(f"[DEBUG JSON] {datos}")
+
     if not datos:
         return jsonify({"error": "Payload JSON invalido"}), 400
 
@@ -100,6 +108,7 @@ def recibir_telemetria():
 
     respuesta = {}
     minutos_espera = minutos_hasta_proxima_ventana(ahora)
+    prevision = None
 
     # Lógica de Decisión del Backend
     if estado_manual_usuario == "FORZAR_ABRIR":
@@ -122,7 +131,7 @@ def recibir_telemetria():
         if humedad < HUMEDAD_CRITICA:
             respuesta = {
                 "orden": "ABRIR",
-                "motivo": "REGALA_HUMEDAD_CRITICA_EMERGENCIA"
+                "motivo": "HUMEDAD_CRITICA_EMERGENCIA"
             }
 
         elif not en_ventana:
@@ -132,7 +141,8 @@ def recibir_telemetria():
             }
 
         elif humedad < HUMEDAD_OBJETIVO:
-            va_a_llover = hay_prevision_lluvia(horizonte_horas=HORIZONTE_AEMET_HORAS)
+            prevision = obtener_prevision_lluvia(horizonte_horas=HORIZONTE_AEMET_HORAS)
+            va_a_llover = prevision["lluvia_prevista"]
             
             if va_a_llover:
                 respuesta = {
@@ -142,7 +152,7 @@ def recibir_telemetria():
             else:
                 respuesta = {
                     "orden": "ABRIR",
-                    "motivo": "REGALA_HUMEDAD_BAJA_SIN_LLUVIA"
+                    "motivo": "HUMEDAD_BAJA_SIN_LLUVIA"
                 }
 
         else:
@@ -153,6 +163,35 @@ def recibir_telemetria():
 
     respuesta["siguiente_ventana_min"] = minutos_espera
     orden_final = respuesta["orden"]
+
+    ultima_telemetria = {
+        "hora": hora_actual_str,
+        "dispositivo": datos.get("dispositivo_id", "DESCONOCIDO"),
+        "ciclo": datos.get("ciclo", "DESCONOCIDO"),
+        "humedad": humedad,
+        "bateria": bateria,
+        "valvula": valvula_reportada,
+        "orden": orden_final,
+        "motivo": respuesta["motivo"],
+        "siguiente_ventana_min": minutos_espera,
+        "lluvia_mm": prevision["mm_acumulados"] if prevision else None,
+        "probabilidad_lluvia": prevision["probabilidad_maxima"] if prevision else None,
+    }
+
+    guardar_telemetria({
+        "recibido_en": ahora_utc_iso(),
+        "dispositivo_id": ultima_telemetria["dispositivo"],
+        "ciclo": ultima_telemetria["ciclo"],
+        "humedad_suelo_pct": humedad,
+        "bateria_v": bateria,
+        "valvula_estado_reportado": valvula_reportada,
+        "orden_backend": orden_final,
+        "motivo_decision": respuesta["motivo"],
+        "lluvia_prevista": prevision["lluvia_prevista"] if prevision else None,
+        "lluvia_mm_3h": ultima_telemetria["lluvia_mm"],
+        "probabilidad_lluvia_pct_3h": ultima_telemetria["probabilidad_lluvia"],
+        "siguiente_ventana_min": minutos_espera,
+    })
 
     # --- SENDER OF NOTIFICATIONS TO TELEGRAM ---
     # Notifica si la válvula cambia de estado o ante eventos clave (emergencia / ahorro por lluvia)
@@ -177,9 +216,25 @@ def recibir_telemetria():
     return jsonify(respuesta), 200
 
 
+@app.route('/api/v1/telemetria/export.csv', methods=['GET'])
+def exportar_telemetria():
+    return Response(
+        exportar_telemetria_csv(),
+        mimetype='text/csv',
+        headers={
+            'Content-Disposition': 'attachment; filename=telemetria_riego.csv'
+        },
+    )
+
+
 if __name__ == '__main__':
     # Lanzamos el escuchador de comandos de Telegram en un hilo secundario
-    iniciar_bot_polling(obtener_estado_manual, establecer_estado_manual)
+    iniciar_bot_polling(
+        obtener_estado_manual,
+        establecer_estado_manual,
+        obtener_ultima_telemetria,
+    )
     
     # Ejecutamos el servidor Flask
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Evita que el recargador de Flask inicie un segundo polling de Telegram.
+    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)

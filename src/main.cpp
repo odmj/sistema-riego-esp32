@@ -5,6 +5,9 @@
 #include "gestion_energia.h"
 #include "telemetria.h"
 #include "red_wifi.h"
+#include "soc/soc.h"           // Requerido para registros del sistema
+#include "soc/rtc_cntl_reg.h"  // Requerido para el control de Brownout
+
 
 // Instanciamos los objetos
 SensorHumedad sensor;
@@ -13,7 +16,10 @@ GestionEnergia energia;
 ModuloTelemetria telemetria;
 ModuloRed red;
 
+
 void setup() {
+        // 1. DESACTIVAR EL DETECTOR DE BROWNOUT (Poner al principio del setup)
+    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
     Serial.begin(115200);
     delay(500); 
 
@@ -48,7 +54,7 @@ void setup() {
     }
 
     // Variable para almacenar el tiempo de Deep Sleep sugerido
-    uint32_t minutosSleep = 15; // Valor por defecto de seguridad (15 minutos)
+    uint32_t minutosSleep = TIEMPO_SLEEP_MIN; // Valor por defecto de seguridad
 
     // 5. Evaluación de la decisión (Respuesta del Servidor o Fallback)
     if (respuestaServidor.length() > 0) {
@@ -71,7 +77,7 @@ void setup() {
         } else {
             valvula.cambiarEstado(CERRADA);
         }
-        minutosSleep = 15; // Reintento corto tras un fallo de red
+        minutosSleep = TIEMPO_SLEEP_MIN; // Reintento tras un fallo de red
     }
 
     // 6. Límites de seguridad para el Deep Sleep

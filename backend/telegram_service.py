@@ -84,6 +84,7 @@ def _bucle_polling(
                             "• `/autonomo` - Volver al modo automático (AEMET + Humedad)\n"
                             "• `/estado` - Consultar el modo actual del sistema\n"
                             "• `/telemetria` - Consultar la última lectura recibida\n"
+                            "• `/ultima` - Alias de `/telemetria`\n"
                             "• `/riegos_hoy` - Consultar los riegos iniciados hoy"
                         )
                         enviar_alerta_telegram(msj)

@@ -7,6 +7,7 @@
 // 1. MODO DE EJECUCIÓN
 // ==========================================
 #define MODO_SIMULACION false
+#define MODO_PRUEBA_VALVULA false
 
 // ==========================================
 // 2. ASIGNACIÓN DE PINES (ESP32 DevKit 30p)
@@ -20,7 +21,8 @@
 // 3. PARÁMETROS ENERGÉTICOS Y DE TIEMPO
 // ==========================================
 #define TIEMPO_SLEEP_MIN    30   // Tiempo a dormir entre mediciones (Minutos)
-#define PULSO_VALVULA_MS    100  // Ancho del pulso de 9V para la válvula (Milisegundos)
+#define DURACION_RIEGO_MIN  10   // Tiempo que la válvula permanece abierta (Minutos)
+#define PULSO_VALVULA_MS    100  // Pulso prolongado para prueba visual con LED
 
 // ==========================================
 // 4. CALIBRACIÓN DEL SENSOR CAPACITIVO

@@ -11,6 +11,7 @@ struct OrdenServidor {
     EstadoValvula nuevoEstado;   // ABIERTA o CERRADA
     String motivo;              // Ej: "AEMET_PREDICE_LLUVIA", "REGALA_HUMEDAD_BAJA"
     int minutosHastaProximaVentana; // Minutos indicados por el backend para el próximo Deep Sleep
+    int duracionRiegoMin;       // Duración del riego cuando la orden es ABRIR
 };
 
 class ModuloTelemetria {
@@ -39,6 +40,7 @@ public:
         ordenResultante.ejecutarCambio = false;
         ordenResultante.motivo = "DESCONOCIDO";
         ordenResultante.minutosHastaProximaVentana = TIEMPO_SLEEP_MIN; // Valor por defecto de seguridad
+        ordenResultante.duracionRiegoMin = DURACION_RIEGO_MIN;
 
         JsonDocument doc;
         DeserializationError error = deserializeJson(doc, jsonRespuesta);
@@ -55,6 +57,7 @@ public:
         ordenResultante.motivo = String(motivoStr);
         // Extraemos los minutos que faltan para la siguiente ventana
         ordenResultante.minutosHastaProximaVentana = doc["siguiente_ventana_min"] | TIEMPO_SLEEP_MIN;
+        ordenResultante.duracionRiegoMin = doc["duracion_riego_min"] | DURACION_RIEGO_MIN;
 
         if (String(ordenStr) == "ABRIR") {
             ordenResultante.ejecutarCambio = true;

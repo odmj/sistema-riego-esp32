@@ -1,7 +1,15 @@
 from flask import Flask, Response, request, jsonify
 from datetime import datetime, timedelta
 from aemet_service import obtener_prevision_lluvia
-from persistence import ahora_utc_iso, exportar_telemetria_csv, guardar_telemetria, inicializar_bbdd
+from persistence import (
+    ahora_utc_iso,
+    contar_riegos_del_dia,
+    exportar_telemetria_csv,
+    finalizar_ultimo_riego,
+    guardar_telemetria,
+    inicializar_bbdd,
+    registrar_inicio_riego,
+)
 from telegram_service import enviar_alerta_telegram, iniciar_bot_polling
 
 # Inicializamos la aplicación Flask
@@ -20,8 +28,9 @@ VENTANAS_RIEGO = [
 HORIZONTE_AEMET_HORAS = 3
 INTERVALO_CHEQUEO_RIEGO_MIN = 30
 
-HUMEDAD_CRITICA = 15.0   # Emergencia: riega directo independientemente del horario o AEMET
+HUMEDAD_CRITICA = 15.0   # Umbral crítico, aplicable dentro de una ventana de riego
 HUMEDAD_OBJETIVO = 25.0  # Umbral para riego autónomo normal
+DURACION_RIEGO_MIN = 10  # Tiempo que la válvula permanece abierta antes del siguiente despertar
 
 # Variables globales de control
 estado_manual_usuario = "AUTONOMO"  # "AUTONOMO", "FORZAR_ABRIR", "FORZAR_CERRAR"
@@ -109,14 +118,14 @@ def recibir_telemetria():
     respuesta = {}
     minutos_espera = minutos_hasta_proxima_ventana(ahora)
     prevision = None
+    en_ventana = esta_en_ventana_riego(ahora)
 
     # Lógica de Decisión del Backend
-    if estado_manual_usuario == "FORZAR_ABRIR":
+    if valvula_reportada == "ABIERTA":
         respuesta = {
-            "orden": "ABRIR",
-            "motivo": "ORDEN_MANUAL_DESDE_TELEGRAM"
+            "orden": "CERRADA",
+            "motivo": "FIN_DURACION_RIEGO"
         }
-        estado_manual_usuario = "AUTONOMO"  # Una vez atendida, regresamos al modo autónomo
 
     elif estado_manual_usuario == "FORZAR_CERRAR":
         respuesta = {
@@ -125,19 +134,24 @@ def recibir_telemetria():
         }
         estado_manual_usuario = "AUTONOMO"
 
-    else:
-        en_ventana = esta_en_ventana_riego(ahora)
+    elif estado_manual_usuario == "FORZAR_ABRIR" and en_ventana:
+        respuesta = {
+            "orden": "ABRIR",
+            "motivo": "ORDEN_MANUAL_DESDE_TELEGRAM"
+        }
+        estado_manual_usuario = "AUTONOMO"  # Una vez atendida, regresamos al modo autónomo
 
+    elif not en_ventana:
+        respuesta = {
+            "orden": "CERRADA",
+            "motivo": f"FUERA_DE_VENTANA_RIEGO (Próxima en {minutos_espera} min)"
+        }
+
+    else:
         if humedad < HUMEDAD_CRITICA:
             respuesta = {
                 "orden": "ABRIR",
-                "motivo": "HUMEDAD_CRITICA_EMERGENCIA"
-            }
-
-        elif not en_ventana:
-            respuesta = {
-                "orden": "CERRADA",
-                "motivo": f"FUERA_DE_VENTANA_RIEGO (Próxima en {minutos_espera} min)"
+                "motivo": "HUMEDAD_CRITICA_DENTRO_VENTANA_RIEGO"
             }
 
         elif humedad < HUMEDAD_OBJETIVO:
@@ -162,7 +176,22 @@ def recibir_telemetria():
             }
 
     respuesta["siguiente_ventana_min"] = minutos_espera
+    respuesta["duracion_riego_min"] = DURACION_RIEGO_MIN
     orden_final = respuesta["orden"]
+
+    if orden_final == "ABRIR" and valvula_reportada != "ABIERTA":
+        registrar_inicio_riego({
+            "iniciado_en": ahora_utc_iso(),
+            "duracion_programada_min": DURACION_RIEGO_MIN,
+            "humedad_inicio_pct": humedad,
+            "modo": "MANUAL" if "MANUAL" in respuesta["motivo"] else "AUTONOMO",
+            "motivo": respuesta["motivo"],
+            "lluvia_prevista": prevision["lluvia_prevista"] if prevision else None,
+            "dispositivo_id": datos.get("dispositivo_id", "DESCONOCIDO"),
+            "ciclo_inicio": datos.get("ciclo"),
+        })
+    elif valvula_reportada == "ABIERTA" and orden_final == "CERRADA":
+        finalizar_ultimo_riego(humedad, ahora_utc_iso())
 
     ultima_telemetria = {
         "hora": hora_actual_str,
@@ -233,6 +262,7 @@ if __name__ == '__main__':
         obtener_estado_manual,
         establecer_estado_manual,
         obtener_ultima_telemetria,
+        contar_riegos_del_dia,
     )
     
     # Ejecutamos el servidor Flask

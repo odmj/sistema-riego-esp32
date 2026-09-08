@@ -35,6 +35,12 @@ void setup() {
     valvula.iniciar();
     energia.iniciar();
 
+    #if MODO_PRUEBA_VALVULA
+        valvula.probarDirecciones();
+        delay(2000);
+        energia.entrarEnDeepSleep(5);
+    #endif
+
     // 2. Lecturas de las instancias
     float vbat = energia.leerVoltajeBateria();
     float humedad = sensor.leerPorcentaje();
@@ -62,22 +68,22 @@ void setup() {
         OrdenServidor orden = telemetria.procesarRespuestaServidor(respuestaServidor);
         Serial.printf("[LOGICA] Motivo del servidor: %s\n", orden.motivo.c_str());
 
-        if (orden.ejecutarCambio) {
-            valvula.cambiarEstado(orden.nuevoEstado);
-        }
-
-        // Asignamos el tiempo devuelto por el backend
+        // Por defecto, dormimos hasta la próxima ventana de riego.
         minutosSleep = orden.minutosHastaProximaVentana;
 
-    } else {
-        // FALLBACK LOCAL: Si falla la red Wi-Fi, aplicamos una regla de emergencia básica
-        Serial.println("\n[ALERTA] Sin comunicación con el servidor. Aplicando Lógica de Emergencia Local...");
-        if (humedad < 20.0f) { // Solo riega si está extremadamente seco
-            valvula.cambiarEstado(ABIERTA);
-        } else {
-            valvula.cambiarEstado(CERRADA);
+        if (orden.ejecutarCambio) {
+            valvula.cambiarEstado(orden.nuevoEstado);
+            if (orden.nuevoEstado == ABIERTA) {
+                // Una apertura inicia un riego temporizado.
+                minutosSleep = orden.duracionRiegoMin;
+            }
         }
-        minutosSleep = TIEMPO_SLEEP_MIN; // Reintento tras un fallo de red
+
+    } else {
+        // Sin respuesta del backend no conocemos la ventana de riego: mantener cerrado.
+        Serial.println("\n[ALERTA] Sin comunicación con el servidor. Manteniendo la válvula cerrada...");
+        valvula.cambiarEstado(CERRADA);
+        minutosSleep = TIEMPO_SLEEP_MIN;
     }
 
     // 6. Límites de seguridad para el Deep Sleep

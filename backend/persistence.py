@@ -38,12 +38,33 @@ def inicializar_bbdd():
             """
         )
         connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS riegos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                iniciado_en TEXT NOT NULL,
+                finalizado_en TEXT,
+                duracion_programada_min INTEGER NOT NULL,
+                humedad_inicio_pct REAL,
+                humedad_fin_pct REAL,
+                modo TEXT NOT NULL,
+                motivo TEXT NOT NULL,
+                lluvia_prevista INTEGER,
+                dispositivo_id TEXT NOT NULL,
+                ciclo_inicio INTEGER
+            )
+            """
+        )
+        connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_telemetria_recibido_en "
             "ON telemetria(recibido_en)"
         )
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_telemetria_dispositivo_ciclo "
             "ON telemetria(dispositivo_id, ciclo)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_riegos_iniciado_en "
+            "ON riegos(iniciado_en)"
         )
 
 
@@ -81,6 +102,67 @@ def guardar_telemetria(telemetria):
                 telemetria["siguiente_ventana_min"],
             ),
         )
+
+
+def registrar_inicio_riego(riego):
+    with _connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO riegos (
+                iniciado_en,
+                duracion_programada_min,
+                humedad_inicio_pct,
+                modo,
+                motivo,
+                lluvia_prevista,
+                dispositivo_id,
+                ciclo_inicio
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                riego["iniciado_en"],
+                riego["duracion_programada_min"],
+                riego["humedad_inicio_pct"],
+                riego["modo"],
+                riego["motivo"],
+                riego["lluvia_prevista"],
+                riego["dispositivo_id"],
+                riego["ciclo_inicio"],
+            ),
+        )
+
+
+def finalizar_ultimo_riego(humedad_fin_pct, finalizado_en):
+    with _connect() as connection:
+        connection.execute(
+            """
+            UPDATE riegos
+            SET finalizado_en = ?, humedad_fin_pct = ?
+            WHERE id = (
+                SELECT id FROM riegos
+                WHERE finalizado_en IS NULL
+                ORDER BY id DESC
+                LIMIT 1
+            )
+            """,
+            (finalizado_en, humedad_fin_pct),
+        )
+
+
+def contar_riegos_del_dia(fecha=None):
+    if fecha is None:
+        fecha = datetime.now().date().isoformat()
+
+    with _connect() as connection:
+        fila = connection.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM riegos
+            WHERE date(iniciado_en, 'localtime') = ?
+            """,
+            (fecha,),
+        ).fetchone()
+    return fila["total"]
 
 
 def exportar_telemetria_csv():

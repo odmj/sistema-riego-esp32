@@ -27,6 +27,26 @@ public:
         return estadoRTC;
     }
 
+    void probarDirecciones() {
+        Serial.println("[PRUEBA] Apertura: GPIO26 HIGH, GPIO27 LOW");
+        digitalWrite(PIN_VALVULA_INA, HIGH);
+        digitalWrite(PIN_VALVULA_INB, LOW);
+        delay(PULSO_VALVULA_MS);
+        digitalWrite(PIN_VALVULA_INA, LOW);
+        digitalWrite(PIN_VALVULA_INB, LOW);
+
+        delay(1000);
+
+        Serial.println("[PRUEBA] Cierre: GPIO26 LOW, GPIO27 HIGH");
+        digitalWrite(PIN_VALVULA_INA, LOW);
+        digitalWrite(PIN_VALVULA_INB, HIGH);
+        delay(PULSO_VALVULA_MS);
+        digitalWrite(PIN_VALVULA_INA, LOW);
+        digitalWrite(PIN_VALVULA_INB, LOW);
+
+        Serial.println("[PRUEBA] Fin: ambos pines LOW");
+    }
+
     // Aplica el cambio de estado (abrir/cerrar) solo si es necesario
     void cambiarEstado(EstadoValvula nuevoEstado) {
         // REGLA DE EFICIENCIA: Si el estado deseado es igual al actual, NO gastamos batería

@@ -1,23 +1,72 @@
-# PlatformIO y VS Code
+# ============================================
+# PlatformIO
+# ============================================
 .pio/
+.pioenvs/
+.piolibdeps/
+platformio-device-monitor-*.log
+
+# ============================================
+# VS Code
+# ============================================
 .vscode/.browse.c_cpp.db*
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch/
 
-# Entornos Virtuales de Python (Cubre raíz y subcarpetas)
+# ============================================
+# Credenciales del firmware
+# ============================================
+src/config_local.h
+
+# ============================================
+# Entornos virtuales de Python
+# ============================================
 venv/
 backend/venv/
 *.venv/
+.venv/
 
+# ============================================
 # Caché de Python
+# ============================================
 __pycache__/
 *.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Archivos de Entorno y Claves Secretas
+# ============================================
+# Empaquetado Python
+# ============================================
+*.egg-info/
+build/
+dist/
+
+# ============================================
+# Archivos de entorno y secretos
+# ============================================
 .env
 *.env
 
-# Datos locales de telemetría
+# ============================================
+# Datos locales y logs
+# ============================================
 data/*.sqlite3
+*.sqlite3
+*.db
 backend/flask.log
+*.log
+
+# ============================================
+# Sistema operativo
+# ============================================
+.DS_Store
+Thumbs.db
+
+# ============================================
+# Editores (temporales)
+# ============================================
+*~
+*.swp

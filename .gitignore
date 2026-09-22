@@ -54,6 +54,12 @@ dist/
 # Datos locales y logs
 # ============================================
 data/*.sqlite3
+data/*.sqlite3-wal
+data/*.sqlite3-shm
+
+*.db-wal
+*.db-shm
+
 *.sqlite3
 *.db
 backend/flask.log
@@ -70,3 +76,4 @@ Thumbs.db
 # ============================================
 *~
 *.swp
+

@@ -11,16 +11,30 @@ enum EstadoValvula {
 // --- VARIABLE EN MEMORIA RTC ---
 // 'RTC_DATA_ATTR' guarda esta variable en la memoria que NO se borra durante el Deep Sleep.
 RTC_DATA_ATTR static EstadoValvula estadoRTC = CERRADA;
+RTC_DATA_ATTR static uint32_t magicValvula = 0;
+#define VALVULA_MAGIC 0xDEADBEEF
 
 class ControlValvula {
 public:
     // Método para inicializar los pines del puente H (L9110S)
-    void iniciar() {
+    void iniciar() 
+    {
         pinMode(PIN_VALVULA_INA, OUTPUT);
         pinMode(PIN_VALVULA_INB, OUTPUT);
         digitalWrite(PIN_VALVULA_INA, LOW);
         digitalWrite(PIN_VALVULA_INB, LOW);
+
+    if (magicValvula != VALVULA_MAGIC) {
+        LOG("[VALVULA] Primer arranque. Forzando cierre por seguridad.\n");
+        digitalWrite(PIN_VALVULA_INA, LOW);
+        digitalWrite(PIN_VALVULA_INB, HIGH);
+        delay(PULSO_VALVULA_MS);
+        digitalWrite(PIN_VALVULA_INA, LOW);
+        digitalWrite(PIN_VALVULA_INB, LOW);
+        estadoRTC = CERRADA;
+        magicValvula = VALVULA_MAGIC;
     }
+    }   
 
     // Devuelve el estado guardado en la memoria RTC
     EstadoValvula obtenerEstadoActual() {

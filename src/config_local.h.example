@@ -5,10 +5,10 @@
 // CREDENCIALES LOCALES — NO VERSIONAR
 // ==========================================
 
-#define WIFI_SSID       "AIREON654846"
-#define WIFI_PASSWORD   "d74hdf8dy3h"
+#define WIFI_SSID       "test1"
+#define WIFI_PASSWORD   "test2"
 
-#define BACKEND_HOST    "192.168.1.154"
+#define BACKEND_HOST    "192.168.1.111"
 #define BACKEND_PORT    5000
 
 #endif // CONFIG_LOCAL_H

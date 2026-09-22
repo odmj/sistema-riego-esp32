@@ -26,19 +26,22 @@
 #if DEBUG_MODE
     #define LOG(x)      Serial.println(x)
     #define LOGF(...)   Serial.printf(__VA_ARGS__)
+    #define LOGE(x)     Serial.println(x)   // Errores y alertas (siempre activos en dev)
 #else
     #define LOG(x)      do {} while (0)
     #define LOGF(...)   do {} while (0)
+    #define LOGE(x)     do {} while (0)     // En producción también silenciados
 #endif
 
 // ==========================================
 // 1. ASIGNACIÓN DE PINES (ESP32 DevKit 30p)
 // ==========================================
-#define PIN_SENSOR_ADC   34   // ADC1_CH6 - solo entrada
-#define PIN_SENSOR_VCC   25   // Alimentación conmutada del sensor (evita corrosión)
-                              // OJO: consumo máx. GPIO ~12 mA. Verificar sensor.
-#define PIN_VALVULA_INA  26   // Puente H L9110S - canal A
-#define PIN_VALVULA_INB  27   // Puente H L9110S - canal B
+#define PIN_SENSOR_ADC    34   // ADC1_CH6 - sensor de humedad
+#define PIN_SENSOR_VCC    25   // Alimentación conmutada del sensor
+#define PIN_VALVULA_INA   26   // Puente H L9110S - canal A
+#define PIN_VALVULA_INB   27   // Puente H L9110S - canal B
+#define PIN_BATERIA_ADC   35   // ADC1_CH7 - divisor de tensión batería
+
 
 // ==========================================
 // 2. PARÁMETROS DE CICLO Y RIEGO
@@ -72,5 +75,22 @@
 
 #define BACKEND_ENDPOINT  "/api/v1/telemetria"
 #define WIFI_TIMEOUT_MS   8000
+
+// ==========================================
+// 5. LÓGICA LOCAL (FALLBACK SIN BACKEND)
+// ==========================================
+// Umbral crítico de humedad por debajo del cual se riega sí o sí
+// aunque no haya comunicación con el backend.
+#define UMBRAL_CRITICO_HUMEDAD   30   // % — por debajo, riego de emergencia
+
+// Histéresis: si la humedad sube por encima de este valor tras un riego,
+// no volver a regar hasta el siguiente ciclo normal.
+#define UMBRAL_HISTERESIS        45   // % — por encima, no regar
+
+// Duración del riego autónomo (independiente del backend)
+// Puede coincidir con DURACION_RIEGO_MIN o ser un valor conservador.
+#define DURACION_RIEGO_AUTONOMO_MIN  8
+
+#define MAX_CICLOS_CRITICOS         3
 
 #endif // CONFIG_H

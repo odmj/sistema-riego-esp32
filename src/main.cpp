@@ -5,32 +5,45 @@
 #include "gestion_energia.h"
 #include "telemetria.h"
 #include "red_wifi.h"
-#include "soc/soc.h"           // Requerido para registros del sistema
-#include "soc/rtc_cntl_reg.h"  // Requerido para el control de Brownout
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 
-
-// Instanciamos los objetos
-SensorHumedad sensor;
-ControlValvula valvula;
-GestionEnergia energia;
+// ==========================================
+// INSTANCIAS DE MÓDULOS
+// ==========================================
+SensorHumedad    sensor;
+ControlValvula   valvula;
+GestionEnergia   energia;
 ModuloTelemetria telemetria;
-ModuloRed red;
+ModuloRed        red;
 
+// ==========================================
+// VARIABLES PERSISTENTES EN RTC
+// Sobreviven al deep sleep, se pierden en reinicio total.
+// El contador de ciclos vive en GestionEnergia (RTC_DATA_ATTR interno).
+// ==========================================
+RTC_DATA_ATTR uint8_t ciclosConHumedadCritica = 0;
 
+// ==========================================
+// SETUP (único punto de entrada en deep sleep)
+// ==========================================
 void setup() {
-        // 1. DESACTIVAR EL DETECTOR DE BROWNOUT (Poner al principio del setup)
+    // 1. Desactivar detector de brownout (al principio, antes de nada)
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
-    Serial.begin(115200);
-    delay(500); 
 
+    #if DEBUG_MODE
+        Serial.begin(115200);
+        delay(500);
+    #endif
+
+    // 2. Registrar ciclo en el módulo de energía
     uint32_t cicloActual = energia.registrarCiclo();
 
-    Serial.println("==============================================");
-    Serial.println("  SISTEMA DE RIEGO IoT - PROTOCOLO MONOCANAL  ");
-    Serial.printf("  Ejecutando Ciclo #%d\n", cicloActual);
-    Serial.println("==============================================");
+    LOGF("==============================================\n");
+    LOGF("  SISTEMA DE RIEGO IoT - CICLO #%u\n", cicloActual);
+    LOGF("==============================================\n");
 
-    // 1. Inicialización de periféricos
+    // 3. Inicialización de periféricos
     sensor.iniciar();
     valvula.iniciar();
     energia.iniciar();
@@ -41,65 +54,99 @@ void setup() {
         energia.entrarEnDeepSleep(5);
     #endif
 
-    // 2. Lecturas de las instancias
-    float vbat = energia.leerVoltajeBateria();
+    // 4. Lecturas
+    float vbat    = energia.leerVoltajeBateria();
     float humedad = sensor.leerPorcentaje();
     EstadoValvula estadoActual = valvula.obtenerEstadoActual();
 
-    // 3. Generación del Payload JSON
-    String payload = telemetria.generarPayload(cicloActual, vbat, humedad, estadoActual);
-    
-    Serial.println("\n[TELEMETRÍA] Payload JSON listo para transmisión:");
-    Serial.println(payload);
+    EstadoBateria estadoBat = energia.evaluarBateria(vbat);
+    LOGF("[ENERGIA] Bateria: %.2fV (%s)\n", vbat, energia.estadoBateriaStr(estadoBat));
+    LOGF("[SENSOR] Humedad: %.1f%%\n", humedad);
 
-    // 4. Intento de conexión Wi-Fi y envío
+    // 5. Generación de payload
+    String payload = telemetria.generarPayload(cicloActual, vbat, humedad, estadoActual);
+    LOGF("[TELEMETRIA] Payload: %s\n", payload.c_str());
+
+    // 6. Envío al backend (una sola conexión)
     String respuestaServidor = "";
     if (red.conectar()) {
         respuestaServidor = red.enviarTelemetria(payload);
-        red.desconectar(); // Apagamos la antena Wi-Fi inmediatamente tras el envío
+        red.desconectar();
     }
 
-    // Variable para almacenar el tiempo de Deep Sleep sugerido
-    uint32_t minutosSleep = TIEMPO_SLEEP_MIN; // Valor por defecto de seguridad
+    // =====================================================
+    // 7. DECISIÓN DE RIEGO
+    // =====================================================
+    uint32_t minutosSleep = TIEMPO_SLEEP_MIN;
+    bool decisionTomadaPorBackend = false;
 
-    // 5. Evaluación de la decisión (Respuesta del Servidor o Fallback)
-    if (respuestaServidor.length() > 0) {
-        Serial.println("\n[SISTEMA] Procesando orden recibida del Backend...");
+    // 7.1. Protección por batería crítica (prioridad máxima)
+    if (estadoBat == BATERIA_CRITICA) {
+        LOGE("[PROTECCION] Bateria critica. No se activa la valvula.\n");
+        valvula.cambiarEstado(CERRADA);
+        minutosSleep = TIEMPO_SLEEP_MIN * 4; // Dormir más para intentar recargar
+    }
+    // 7.2. Si hay respuesta del backend, obedecer (con límites de seguridad)
+    else if (respuestaServidor.length() > 0) {
+        LOG("[SISTEMA] Orden recibida del backend.\n");
         OrdenServidor orden = telemetria.procesarRespuestaServidor(respuestaServidor);
-        Serial.printf("[LOGICA] Motivo del servidor: %s\n", orden.motivo.c_str());
+        LOGF("[LOGICA] Motivo: %s\n", orden.motivo.c_str());
 
-        // Por defecto, dormimos hasta la próxima ventana de riego.
         minutosSleep = orden.minutosHastaProximaVentana;
 
         if (orden.ejecutarCambio) {
-            valvula.cambiarEstado(orden.nuevoEstado);
             if (orden.nuevoEstado == ABIERTA) {
-                // Una apertura inicia un riego temporizado.
-                minutosSleep = orden.duracionRiegoMin;
+                uint32_t duracion = orden.duracionRiegoMin;
+                if (duracion > TIEMPO_MAX_RIEGO_MIN) {
+                    LOGE("[SEGURIDAD] Duracion excede maximo. Ajustando.\n");
+                    duracion = TIEMPO_MAX_RIEGO_MIN;
+                }
+                minutosSleep = duracion;
             }
+            valvula.cambiarEstado(orden.nuevoEstado);
         }
 
-    } else {
-        // Sin respuesta del backend no conocemos la ventana de riego: mantener cerrado.
-        Serial.println("\n[ALERTA] Sin comunicación con el servidor. Manteniendo la válvula cerrada...");
-        valvula.cambiarEstado(CERRADA);
-        minutosSleep = TIEMPO_SLEEP_MIN;
+        decisionTomadaPorBackend = true;
+
+        // Al recuperar comunicación, reseteamos el contador de críticos
+        ciclosConHumedadCritica = 0;
     }
 
-    // 6. Límites de seguridad para el Deep Sleep
-    if (minutosSleep > 240) {
-        minutosSleep = 240; // Máximo 4 horas para evitar desvíos del RTC
-    }
-    if (minutosSleep < 5) {
-        minutosSleep = 5;   // Mínimo 5 minutos para evitar bucles de reinicio rápidos
+    // 7.3. Fallback: lógica local si el backend no responde
+    if (!decisionTomadaPorBackend && estadoBat != BATERIA_CRITICA) {
+        LOGE("[ALERTA] Sin backend. Modo autonomo local.\n");
+
+        if (humedad < UMBRAL_CRITICO_HUMEDAD) {
+            ciclosConHumedadCritica++;
+            LOGF("[LOCAL] Humedad critica. Ciclos consecutivos: %u\n",
+                 ciclosConHumedadCritica);
+
+            if (ciclosConHumedadCritica > MAX_CICLOS_CRITICOS) {
+                // El riego no está funcionando: no insistir
+                LOGE("[ALERTA] Riego inefectivo tras varios ciclos. Revisar hardware.\n");
+                valvula.cambiarEstado(CERRADA);
+                minutosSleep = TIEMPO_SLEEP_MIN * 4; // Esperar más antes de reintentar
+            } else {
+                LOG("[LOCAL] Abriendo valvula por riego autonomo.\n");
+                valvula.cambiarEstado(ABIERTA);
+                minutosSleep = DURACION_RIEGO_AUTONOMO_MIN;
+            }
+        } else {
+            LOG("[LOCAL] Humedad suficiente. No se riega.\n");
+            valvula.cambiarEstado(CERRADA);
+            minutosSleep = TIEMPO_SLEEP_MIN;
+            ciclosConHumedadCritica = 0; // Reset al recuperar humedad
+        }
     }
 
-    Serial.printf("\n[ENERGÍA] Configurando Deep Sleep para los próximos %d minutos.\n", minutosSleep);
+    // 8. Límites de seguridad para el deep sleep
+    if (minutosSleep > 240) minutosSleep = 240; // Máx 4h (evita desvíos del RTC)
+    if (minutosSleep < 5)   minutosSleep = 5;   // Mín 5 min (evita bucles)
 
-    // 7. Dormir el sistema con el tiempo dinámico calculado
+    LOGF("[ENERGIA] Deep sleep: %u minutos\n", minutosSleep);
     energia.entrarEnDeepSleep(minutosSleep);
 }
 
 void loop() {
-    // Vacío (Deep Sleep activo)
+    // Vacío (deep sleep activo)
 }

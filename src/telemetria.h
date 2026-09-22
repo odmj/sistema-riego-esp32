@@ -17,31 +17,31 @@ struct OrdenServidor {
 class ModuloTelemetria {
 public:
     // Genera la cadena de texto JSON con las lecturas actuales del dispositivo
-    String generarPayload(uint32_t ciclo, float bateriaV, float humedadPct, EstadoValvula estadoValvula) {
-        // Reservamos un documento JSON estático de 256 bytes en memoria
-        JsonDocument doc;
+   String generarPayload(uint32_t ciclo, float bateriaV, float humedadPct, EstadoValvula estadoValvula) {
+    JsonDocument doc;
 
-        // Poblamos las claves del JSON
-        doc["dispositivo_id"] = "ESP32_RIEGO_01";
-        doc["ciclo"] = ciclo;
-        doc["bateria_v"] = serialized(String(bateriaV, 2));
-        doc["humedad_suelo_pct"] = serialized(String(humedadPct, 1));
-        doc["valvula_estado"] = (estadoValvula == ABIERTA) ? "ABIERTA" : "CERRADA";
+    doc["dispositivo_id"] = "ESP32_RIEGO_01";
+    doc["ciclo"] = ciclo;
+    doc["bateria_v"] = bateriaV;           // ArduinoJson formatea a 2 decimales
+    doc["humedad_suelo_pct"] = humedadPct; // Idem
+    doc["valvula_estado"] = (estadoValvula == ABIERTA) ? "ABIERTA" : "CERRADA";
+    doc["uptime_ms"] = millis();
 
-        // Convertimos el objeto JSON a un String C++
-        String payloadJson;
-        serializeJson(doc, payloadJson);
-        return payloadJson;
-    }
+    String payloadJson;
+    serializeJson(doc, payloadJson);
+    return payloadJson;
+}
 
     // Procesa el JSON de respuesta devuelto por el servidor en Python (app.py)
     OrdenServidor procesarRespuestaServidor(const String& jsonRespuesta) {
-        OrdenServidor ordenResultante;
+       OrdenServidor ordenResultante;
         ordenResultante.ejecutarCambio = false;
+        ordenResultante.nuevoEstado = estadoRTC; // ← coherente por defecto
         ordenResultante.motivo = "DESCONOCIDO";
-        ordenResultante.minutosHastaProximaVentana = TIEMPO_SLEEP_MIN; // Valor por defecto de seguridad
+        ordenResultante.minutosHastaProximaVentana = TIEMPO_SLEEP_MIN;
         ordenResultante.duracionRiegoMin = DURACION_RIEGO_MIN;
-
+       
+        
         JsonDocument doc;
         DeserializationError error = deserializeJson(doc, jsonRespuesta);
 

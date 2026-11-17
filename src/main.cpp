@@ -80,7 +80,7 @@ void setup() {
     uint32_t minutosSleep = TIEMPO_SLEEP_MIN;
     bool decisionTomadaPorBackend = false;
 
-    // 7.1. Protección por batería crítica (prioridad máxima)
+  // 7.1. Protección por batería crítica (prioridad máxima)
     if (estadoBat == BATERIA_CRITICA) {
         LOGE("[PROTECCION] Bateria critica. No se activa la valvula.\n");
         valvula.cambiarEstado(CERRADA);
@@ -111,7 +111,7 @@ void setup() {
         // Al recuperar comunicación, reseteamos el contador de críticos
         ciclosConHumedadCritica = 0;
     }
-
+    
     // 7.3. Fallback: lógica local si el backend no responde
     if (!decisionTomadaPorBackend && estadoBat != BATERIA_CRITICA) {
         LOGE("[ALERTA] Sin backend. Modo autonomo local.\n");

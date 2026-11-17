@@ -52,7 +52,7 @@ inicializar_bbdd()
 # Ventanas autorizadas de riego (Formato 24h: inicio inclusivo, fin exclusivo)
 VENTANAS_RIEGO = [
     {"inicio": 7,  "fin": 10},  # Ventana Mañana: 07:00 a 09:59
-    {"inicio": 21, "fin": 0},   # Ventana Noche:  21:00 a 23:59
+    {"inicio": 16, "fin": 0},   # Ventana Noche:  21:00 a 23:59
 ]
 
 HORIZONTE_AEMET_HORAS = 3

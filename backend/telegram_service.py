@@ -238,6 +238,18 @@ def iniciar_bot_polling(
         logger.warning("Token de Telegram inválido. Polling deshabilitado.")
         return None
 
+    # --- AÑADIR ESTO: Borrar webhook activo antes de iniciar el polling ---
+    try:
+        url_webhook = f"{BASE_URL}/deleteWebhook"
+        res_wh = requests.get(url_webhook, timeout=5)
+        if res_wh.status_code == 200:
+            logger.info("Webhook anterior eliminado correctamente para permitir polling.")
+        else:
+            logger.warning(f"No se pudo eliminar el webhook: {res_wh.text}")
+    except Exception as e:
+        logger.error(f"Excepción al intentar borrar el webhook de Telegram: {e}")
+    # ---------------------------------------------------------------------
+
     stop_event = threading.Event()
     hilo = threading.Thread(
         target=_bucle_polling,

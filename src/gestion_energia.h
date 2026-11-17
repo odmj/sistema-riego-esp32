@@ -33,6 +33,8 @@ public:
     }
 
     float leerVoltajeBateria() {
+        return 3.30f;
+        /*
         #if MODO_SIMULACION
             return 3.30f; // LiFePO4 nominal en rango saludable
         #else
@@ -49,6 +51,7 @@ public:
             float voltaje = (lecturaADC / 4095.0f) * 3.3f * 2.0f;
             return voltaje;
         #endif
+        */
     }
 
     EstadoBateria evaluarBateria(float voltaje) {
